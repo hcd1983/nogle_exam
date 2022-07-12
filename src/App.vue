@@ -11,6 +11,10 @@ export default {
   components: {
     HelloWorld,
   },
+  mounted() {
+    const mySocket = new WebSocket('wss://ws.btse.com/ws/oss/futures', 'trade');
+    console.log(mySocket);
+  },
 };
 </script>
 
