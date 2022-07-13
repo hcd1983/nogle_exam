@@ -7,16 +7,33 @@
         <div>Size</div>
         <div>Total</div>
       </div>
-      <div v-for="([price, size], idx) in asksInView" :key="idx" class="quote-row">
-        <div class="text-[#FF5B5A]">{{ numberWithCommas(price) }}</div>
-        <div>{{ size }}</div>
-        <div></div>
-      </div>
+<!--      <div v-for="([price, size], idx) in asksInView" :key="idx" class="quote-row">-->
+<!--        <div class="text-[#FF5B5A]">{{ numberWithCommas(price) }}</div>-->
+<!--        <div>{{ size }}</div>-->
+<!--        <div></div>-->
+<!--      </div>-->
       <div>Highlight</div>
-      <div v-for="({price, size, total}, idx) in bidsInView" :key="idx" class="quote-row">
-        <div class="text-[#00b15d]">{{ price }}</div>
-        <div>{{ size }}</div>
-        <div>{{ total }}</div>
+      <div
+        v-for="({price, size, total, isNew, sizeChange}, idx) in bidsInView"
+        :key="idx"
+        class="quote-row bid"
+        :class="{
+          'new-row': isNew,
+          increase: sizeChange === 'increase',
+          decrease: sizeChange === 'decrease',
+          same: sizeChange === 'same'
+        }"
+      >
+        <div class="text-[#00b15d]">{{ numberWithCommas(price) }}</div>
+        <div>
+          {{ numberWithCommas(size) }}
+        </div>
+        <div>
+          {{ numberWithCommas(total) }}
+          <span :style="{
+            width: `${getTotalBarWidth(total, bidsInView[bidsInView.length - 1].total)}%`
+          }" />
+        </div>
       </div>
     </div>
     <pre class="text-red-600">
@@ -48,13 +65,16 @@ export default {
       orderBook: [],
       bids: new Map(),
       asks: new Map(),
-      newBids: [],
-      newAsks: [],
+      newBidsPrice: [],
+      newAsksPrice: [],
+      bidsInViewKeys: [],
+      asksInViewKeys: [],
+      bidsSizeChangeLog: null,
     };
   },
   computed: {
     bidsInView() {
-      const keys = [...this.bids.keys()].sort().reverse().slice(0, 8);
+      const keys = this.bidsInViewKeys;
       let total = 0;
       return keys.map((key) => {
         const [price, size] = this.bids.get(key);
@@ -62,6 +82,8 @@ export default {
           price,
           size,
           total: total += Number(size),
+          isNew: this.newBidsPrice.includes(price),
+          sizeChange: this.bidsSizeChangeLog.get(price) || null,
         };
         return result;
       });
@@ -97,9 +119,33 @@ export default {
     orderBookWebsocketOnMessage(e) {
       const orderBook = JSON.parse(e.data);
       if (orderBook?.data?.type) {
-        this.orderHandler(this.bids, orderBook.data.bids);
+        this.bidsHandler(orderBook.data.bids);
         this.orderHandler(this.asks, orderBook.data.asks);
       }
+    },
+    bidsHandler(bids) {
+      this.newBidsPrice = [];
+      this.bidsSizeChangeLog = new Map();
+      if (this.bidsInViewKeys.length) {
+        bids.forEach(([price, size]) => {
+          if (!this.bidsInViewKeys.includes(price)) {
+            // new bids in view
+            this.newBidsPrice.push(price);
+          } else {
+            // check if size changed
+            const oldSize = this.bids.get(price)[1];
+            if (size > oldSize) {
+              this.bidsSizeChangeLog.set(price, 'increase');
+            } else if (size < oldSize) {
+              this.bidsSizeChangeLog.set(price, 'decrease');
+            } else {
+              this.bidsSizeChangeLog.set(price, 'same');
+            }
+          }
+        });
+      }
+      this.orderHandler(this.bids, bids);
+      this.setBidsInViewKeys();
     },
     orderHandler(quoteMap, quotes) {
       quotes.forEach(([price, size]) => {
@@ -164,6 +210,12 @@ export default {
     numberWithCommas(x) {
       return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     },
+    setBidsInViewKeys() {
+      this.bidsInViewKeys = [...this.bids.keys()].sort().reverse().slice(0, 8);
+    },
+    getTotalBarWidth(accumulativeTotal, quoteTotal) {
+      return Math.floor((accumulativeTotal / quoteTotal) * 1000) / 10;
+    },
   },
 };
 </script>
@@ -172,7 +224,7 @@ export default {
   @apply flex w-full text-[#8698aa] whitespace-nowrap;
 }
 .quote-row {
-  @apply flex w-full hover:bg-[#1E3059];
+  @apply flex w-full hover:bg-[#1E3059] transition-colors duration-200;
 }
 .quote-row > div, .quote-head > div {
   @apply w-[28%] text-right py-[4px];
@@ -182,5 +234,41 @@ export default {
 }
 .quote-row > div:first-child, .quote-head > div:first-child {
   @apply text-left;
+}
+
+.quote-row > div:last-child {
+  @apply relative;
+}
+
+.quote-row.increase > div:nth-child(2) {
+  @apply transition-colors duration-200;
+}
+
+.quote-row.increase > div:nth-child(2) {
+  color: #00b15d;
+  background-color: rgba(16, 186, 104, 0.12);
+}
+
+.quote-row.decrease > div:nth-child(2) {
+  color: #FF5B5A;
+  background-color: rgba(255, 90, 90, 0.12);
+}
+
+.quote-row.same > div:nth-child(2) {
+  color: #F0F4F8;
+  background-color: rgba(134, 152, 170, 0.12);
+}
+
+.quote-row > div:last-child span {
+  @apply absolute block h-full right-0 top-0;
+  background-color: rgba(16, 186, 104, 0.12);
+}
+
+.quote-row.bid.new-row {
+  background-color: rgba(0, 177, 93, 0.5);
+}
+
+.quote-row.ask.new-row {
+  background-color: rgba(255, 91, 90, 0.5);
 }
 </style>
