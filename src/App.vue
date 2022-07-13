@@ -1,7 +1,11 @@
 <template>
-  <div class="bg-[#131B29] text-[#F0F4F8] w-full min-h-screen text-[24px]">
-    <div class="max-w-[472px] mx-auto pl-[24px] pr-[20px]">
-      <h1 class="font-bold text-[28px] text-white">Order Book</h1>
+  <div class="bg-[#131B29] text-[#F0F4F8] w-full min-h-screen text-[22px]">
+    <div class="max-w-[472px] mx-auto grid grid-cols-1 gap-y-1">
+      <h1
+        class="font-bold text-[24px] text-white pl-[24px] pr-[20px] py-2 border-b border-gray-800"
+      >
+        Order Book
+      </h1>
       <div class="quote-head">
         <div>Price (USD)</div>
         <div>Size</div>
@@ -29,7 +33,17 @@
           }" />
         </div>
       </div>
-      <div>Highlight</div>
+      <div
+        v-if="lastPrice"
+        class="last-price"
+        :class="`${lastPrice.side.toLowerCase()}`"
+      >
+        {{ numberWithCommas(lastPrice.price) }}
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="presentation" fill="none" fill-rule="nonzero" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <polyline points="19 12 12 19 5 12"></polyline>
+        </svg>
+      </div>
       <div
         v-for="({price, size, total, isNew, sizeChange}, idx) in bidsInView"
         :key="idx"
@@ -63,7 +77,8 @@ export default {
   components: {},
   data() {
     return {
-      webSocket: null,
+      lastPriceWebSocket: null,
+      lastPrice: null,
       orderBookWebsocket: null,
       lastPrices: null,
       data: null,
@@ -111,26 +126,46 @@ export default {
       }).reverse();
     },
   },
-  mounted() {
+  created() {
     // this.webSocket = new WebSocket('wss://ws.btse.com/ws/oss/futures');
     this.orderBookWebsocketInit();
-    this.webSocket = new WebSocket('wss://ws.btse.com/ws/futures');
-    this.webSocket.onopen = this.webSocketOnOpen;
-    this.webSocket.onClose = this.webSocketOnClose;
-    this.webSocket.onmessage = this.webSocketOnMessage;
-    this.webSocket.onerror = this.webSocketOnError;
+    this.lastPriceWebSocketInit();
   },
   unmounted() {
-    this.webSocket.close();
+    this.lastPriceWebSocket.close();
     this.orderBookWebsocket.close();
   },
   methods: {
+    lastPriceWebSocketInit() {
+      this.lastPriceWebSocket = new WebSocket('wss://ws.btse.com/ws/futures');
+      this.lastPriceWebSocket.onopen = this.lastPriceWebSocketOnOpen;
+      this.lastPriceWebSocket.onmessage = this.lastPriceWebSocketOnMessage;
+      this.lastPriceWebSocket.onerror = this.webSocketOnError;
+    },
+    lastPriceWebSocketOnOpen() {
+      console.log('last price wws connected');
+      this.subscribeHistory();
+    },
+    lastPriceWebSocketOnMessage(e) {
+      const { data } = JSON.parse(e.data);
+      if (Array.isArray(data)) {
+        [this.lastPrice] = [data[0]];
+      }
+    },
+    subscribeHistory() {
+      const msg = {
+        op: 'subscribe',
+        args: [
+          'tradeHistoryApi:BTCPFC',
+        ],
+      };
+      this.lastPriceWebSocket.send(JSON.stringify(msg));
+    },
     orderBookWebsocketInit() {
       this.orderBookWebsocket = new WebSocket('wss://ws.btse.com/ws/oss/futures');
       this.orderBookWebsocket.onopen = this.orderBookWebsocketOnOpen;
-      // this.orderBookWebsocket.onClose = this.webSocketOnClose;
       this.orderBookWebsocket.onmessage = this.orderBookWebsocketOnMessage;
-      // this.orderBookWebsocket.onerror = this.webSocketOnError;
+      this.orderBookWebsocket.onerror = this.webSocketOnError;
     },
     orderBookWebsocketOnOpen() {
       console.log('order book connected');
@@ -224,34 +259,8 @@ export default {
         }
       });
     },
-    webSocketOnOpen() {
-      console.log('connected');
-      this.sendMessage();
-      // this.webSocket.close();
-    },
-    webSocketOnClose() {
-      console.log('closed');
-    },
-    webSocketOnMessage(e) {
-      console.log(e);
-      const data = JSON.parse(e.data);
-      if (!this.lastPrices && data.topic === 'tradeHistoryApi') {
-        this.lastPrices = data;
-        this.webSocket.close();
-      }
-      this.data = data;
-    },
     webSocketOnError(error) {
       console.log(error);
-    },
-    sendMessage() {
-      const msg = {
-        op: 'subscribe',
-        args: [
-          'tradeHistoryApi:BTCPFC',
-        ],
-      };
-      this.webSocket.send(JSON.stringify(msg));
     },
     numberWithCommas(x) {
       return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -269,14 +278,17 @@ export default {
 };
 </script>
 <style scoped>
+.quote-row, .quote-head {
+  @apply pl-[24px] pr-[20px];
+}
 .quote-head {
   @apply flex w-full text-[#8698aa] whitespace-nowrap;
 }
 .quote-row {
-  @apply flex w-full hover:bg-[#1E3059] transition-colors duration-200;
+  @apply flex w-full hover:bg-[#1E3059] transition-colors duration-200 font-medium;
 }
 .quote-row > div, .quote-head > div {
-  @apply w-[28%] text-right py-[4px];
+  @apply w-[28%] text-right py-[2px];
 }
 .quote-row > div:last-child, .quote-head > div:last-child {
   @apply flex-1;
@@ -289,7 +301,7 @@ export default {
   @apply relative;
 }
 
-.quote-row.increase > div:nth-child(2) {
+.quote-row > div:nth-child(2) {
   @apply transition-colors duration-200;
 }
 
@@ -324,5 +336,22 @@ export default {
 
 .quote-row.ask.new-row {
   background-color: rgba(255, 91, 90, 0.5);
+}
+
+.last-price {
+  @apply flex items-center justify-center gap-2 text-[24px];
+}
+.last-price.buy {
+  color: #00b15d;
+  background-color: rgba(16, 186, 104, 0.12);
+}
+
+.last-price.buy svg {
+ @apply rotate-180;
+}
+
+.last-price.sell {
+  color: #FF5B5A;
+  background-color: rgba(255, 90, 90, 0.12);
 }
 </style>
