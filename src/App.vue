@@ -67,11 +67,12 @@ export default {
       orderBookWebsocket: null,
       lastPrices: null,
       data: null,
+      seqNum: null,
       orderBook: [],
-      bids: new Map(),
-      asks: new Map(),
-      newBidsPrice: [],
-      newAsksPrice: [],
+      bids: null,
+      asks: null,
+      newBidsPrice: null,
+      newAsksPrice: null,
       bidsInViewKeys: [],
       asksInViewKeys: [],
       bidsSizeChangeLog: null,
@@ -137,11 +138,40 @@ export default {
     },
     orderBookWebsocketOnMessage(e) {
       const orderBook = JSON.parse(e.data);
-      if (orderBook?.data?.type) {
-        this.bidsHandler(orderBook.data.bids);
-        this.asksHandler(orderBook.data.asks);
+      if (orderBook?.event === 'unsubscribe') {
+        // 馬上重新訂閱
+        this.orderBookSubscribe();
+      } else if (orderBook?.data?.type) {
+        const { data } = orderBook;
+        if (data.type === 'snapshot') {
+          this.bids = new Map();
+          this.asks = new Map();
+        } else if (data.type === 'delta' && data.prevSeqNum !== this.seqNum) {
+          this.orderBookUnsubscribe();
+        }
+        this.seqNum = data.seqNum;
+        this.bidsHandler(data.bids);
+        this.asksHandler(data.asks);
         // this.orderHandler(this.asks, orderBook.data.asks);
       }
+    },
+    orderBookSubscribe() {
+      const msg = {
+        op: 'subscribe',
+        args: [
+          'update:BTCPFC',
+        ],
+      };
+      this.orderBookWebsocket.send(JSON.stringify(msg));
+    },
+    orderBookUnsubscribe() {
+      const msg = {
+        op: 'unsubscribe',
+        args: [
+          'update:BTCPFC',
+        ],
+      };
+      this.orderBookWebsocket.send(JSON.stringify(msg));
     },
     bidsHandler(bids) {
       this.newBidsPrice = [];
@@ -166,7 +196,7 @@ export default {
       this.setAsksInViewKeys();
     },
     orderLogHandler(inViewKeys, newQuotePriceList, quoteMap, sizeLogMap, quotes) {
-      if (inViewKeys.length) {
+      if (quoteMap.size && inViewKeys.length) {
         quotes.forEach(([price, size]) => {
           if (!inViewKeys.includes(price)) {
             // new quotes in view
@@ -193,28 +223,6 @@ export default {
           quoteMap.delete(price);
         }
       });
-    },
-    orderBookSubscribe() {
-      const msg = {
-        op: 'subscribe',
-        args: [
-          'update:BTCPFC',
-        ],
-      };
-      this.orderBookWebsocket.send(JSON.stringify(msg));
-    },
-    orderBookUnsubscribe() {
-      const msg = {
-        op: 'unsubscribe',
-        args: [
-          'update:BTCPFC',
-        ],
-      };
-      this.orderBookWebsocket.send(JSON.stringify(msg));
-    },
-    orderBookResubscribe() {
-      this.orderBookUnsubscribe();
-      this.orderBookSubscribe();
     },
     webSocketOnOpen() {
       console.log('connected');
