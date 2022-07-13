@@ -7,11 +7,28 @@
         <div>Size</div>
         <div>Total</div>
       </div>
-<!--      <div v-for="([price, size], idx) in asksInView" :key="idx" class="quote-row">-->
-<!--        <div class="text-[#FF5B5A]">{{ numberWithCommas(price) }}</div>-->
-<!--        <div>{{ size }}</div>-->
-<!--        <div></div>-->
-<!--      </div>-->
+      <div
+        v-for="({price, size, total, isNew, sizeChange}, idx) in asksInView"
+        :key="idx"
+        class="quote-row ask"
+        :class="{
+          'new-row': isNew,
+          increase: sizeChange === 'increase',
+          decrease: sizeChange === 'decrease',
+          same: sizeChange === 'same'
+        }"
+      >
+        <div class="text-[#FF5B5A]">{{ numberWithCommas(price) }}</div>
+        <div>
+          {{ numberWithCommas(size) }}
+        </div>
+        <div>
+          {{ numberWithCommas(total) }}
+          <span :style="{
+            width: `${getTotalBarWidth(total, asksInView[0].total)}%`
+          }" />
+        </div>
+      </div>
       <div>Highlight</div>
       <div
         v-for="({price, size, total, isNew, sizeChange}, idx) in bidsInView"
@@ -36,18 +53,6 @@
         </div>
       </div>
     </div>
-    <pre class="text-red-600">
-      {{ Object.keys(bids) }}
-    </pre>
-    <pre>
-      {{ orderBook }}
-    </pre>
-    <pre class="text-red-500">
-      {{ lastPrices?.data?.length }}
-    </pre>
-    <pre>
-      {{ data }}
-    </pre>
   </div>
 </template>
 
@@ -70,6 +75,7 @@ export default {
       bidsInViewKeys: [],
       asksInViewKeys: [],
       bidsSizeChangeLog: null,
+      asksSizeChangeLog: null,
     };
   },
   computed: {
@@ -89,7 +95,19 @@ export default {
       });
     },
     asksInView() {
-      return this.asks;
+      const keys = this.asksInViewKeys;
+      let total = 0;
+      return keys.map((key) => {
+        const [price, size] = this.asks.get(key);
+        const result = {
+          price,
+          size,
+          total: total += Number(size),
+          isNew: this.newAsksPrice.includes(price),
+          sizeChange: this.asksSizeChangeLog.get(price) || null,
+        };
+        return result;
+      }).reverse();
     },
   },
   mounted() {
@@ -103,6 +121,7 @@ export default {
   },
   unmounted() {
     this.webSocket.close();
+    this.orderBookWebsocket.close();
   },
   methods: {
     orderBookWebsocketInit() {
@@ -120,32 +139,51 @@ export default {
       const orderBook = JSON.parse(e.data);
       if (orderBook?.data?.type) {
         this.bidsHandler(orderBook.data.bids);
-        this.orderHandler(this.asks, orderBook.data.asks);
+        this.asksHandler(orderBook.data.asks);
+        // this.orderHandler(this.asks, orderBook.data.asks);
       }
     },
     bidsHandler(bids) {
       this.newBidsPrice = [];
       this.bidsSizeChangeLog = new Map();
-      if (this.bidsInViewKeys.length) {
-        bids.forEach(([price, size]) => {
-          if (!this.bidsInViewKeys.includes(price)) {
-            // new bids in view
-            this.newBidsPrice.push(price);
+      const newQuotePriceList = this.newBidsPrice;
+      const inViewKeys = this.bidsInViewKeys;
+      const quoteMap = this.bids;
+      const sizeLogMap = this.bidsSizeChangeLog;
+      this.orderLogHandler(inViewKeys, newQuotePriceList, quoteMap, sizeLogMap, bids);
+      this.orderHandler(this.bids, bids);
+      this.setBidsInViewKeys();
+    },
+    asksHandler(asks) {
+      this.newAsksPrice = [];
+      this.asksSizeChangeLog = new Map();
+      const newQuotePriceList = this.newAsksPrice;
+      const inViewKeys = this.asksInViewKeys;
+      const quoteMap = this.asks;
+      const sizeLogMap = this.asksSizeChangeLog;
+      this.orderLogHandler(inViewKeys, newQuotePriceList, quoteMap, sizeLogMap, asks);
+      this.orderHandler(this.asks, asks);
+      this.setAsksInViewKeys();
+    },
+    orderLogHandler(inViewKeys, newQuotePriceList, quoteMap, sizeLogMap, quotes) {
+      if (inViewKeys.length) {
+        quotes.forEach(([price, size]) => {
+          if (!inViewKeys.includes(price)) {
+            // new quotes in view
+            newQuotePriceList.push(price);
           } else {
             // check if size changed
-            const oldSize = this.bids.get(price)[1];
+            const oldSize = quoteMap.get(price)[1];
             if (size > oldSize) {
-              this.bidsSizeChangeLog.set(price, 'increase');
+              sizeLogMap.set(price, 'increase');
             } else if (size < oldSize) {
-              this.bidsSizeChangeLog.set(price, 'decrease');
+              sizeLogMap.set(price, 'decrease');
             } else {
-              this.bidsSizeChangeLog.set(price, 'same');
+              sizeLogMap.set(price, 'same');
             }
           }
         });
       }
-      this.orderHandler(this.bids, bids);
-      this.setBidsInViewKeys();
     },
     orderHandler(quoteMap, quotes) {
       quotes.forEach(([price, size]) => {
@@ -213,6 +251,9 @@ export default {
     setBidsInViewKeys() {
       this.bidsInViewKeys = [...this.bids.keys()].sort().reverse().slice(0, 8);
     },
+    setAsksInViewKeys() {
+      this.asksInViewKeys = [...this.asks.keys()].sort().slice(0, 8);
+    },
     getTotalBarWidth(accumulativeTotal, quoteTotal) {
       return Math.floor((accumulativeTotal / quoteTotal) * 1000) / 10;
     },
@@ -259,9 +300,14 @@ export default {
   background-color: rgba(134, 152, 170, 0.12);
 }
 
-.quote-row > div:last-child span {
+.quote-row.bid > div:last-child span {
   @apply absolute block h-full right-0 top-0;
   background-color: rgba(16, 186, 104, 0.12);
+}
+
+.quote-row.ask > div:last-child span {
+  @apply absolute block h-full right-0 top-0;
+  background-color: rgba(255, 90, 90, 0.12);
 }
 
 .quote-row.bid.new-row {
